@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FileMaker Layout DDR Explorer</title>
+<style>
+:root{color-scheme:dark;--bg:#07111f;--panel:#101b2c;--line:#25334a;--muted:#8fa0b8;--cyan:#22d3ee;--text:#edf6ff;--rose:#fb7185}*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#07111f,#091424 60%,#06101c);color:var(--text);font:15px system-ui,-apple-system,Segoe UI,sans-serif}header{border-bottom:1px solid var(--line);padding:24px}.wrap{max-width:1200px;margin:auto}.top{display:flex;gap:20px;align-items:end;justify-content:space-between}.eyebrow{color:var(--cyan);font-size:11px;font-weight:800;letter-spacing:.22em;text-transform:uppercase}h1{margin:4px 0;font-size:30px}.muted{color:var(--muted)}select,button,.pick{border:1px solid var(--line);background:#111e31;color:var(--text);padding:11px 16px;border-radius:12px;cursor:pointer;font-weight:700}select{border:1px solid var(--line);background:#111e31;color:var(--text);padding:10px 12px;border-radius:12px}.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.primary{background:var(--cyan);color:#03212a;border-color:var(--cyan)}button:disabled{opacity:.5;cursor:not-allowed}main{padding:22px}.panel,.card{background:rgba(16,27,44,.95);border:1px solid var(--line);border-radius:18px}.panel{padding:16px}.controls{display:grid;grid-template-columns:auto auto 1fr auto;gap:12px}.modes{display:flex;background:#07111f;border-radius:12px;padding:4px}.mode{border:0;background:transparent;color:var(--muted);padding:9px 12px}.mode.active{background:var(--cyan);color:#03212a}.exact-option{display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--muted);white-space:nowrap}.exact-option input{width:17px;height:17px;accent-color:var(--cyan)}.search{width:100%;border:1px solid var(--line);background:#07111f;color:var(--text);border-radius:12px;padding:12px 15px;outline:none}.search:focus{border-color:var(--cyan)}.status{display:flex;flex-wrap:wrap;gap:18px;margin-top:12px;font-size:12px;color:var(--muted)}.bar{height:7px;background:#07111f;border-radius:12px;overflow:hidden;margin-top:10px}.bar i{display:block;height:100%;background:var(--cyan);width:0}.summary{display:flex;justify-content:space-between;align-items:center;margin:24px 2px 10px}.card{overflow:hidden;margin:10px 0}.cardhead{display:flex;justify-content:space-between;padding:15px 18px;border-bottom:1px solid var(--line)}.card h3{margin:0;color:#67e8f9}.small{font-size:12px;color:var(--muted);margin-top:4px}table{border-collapse:collapse;width:100%;min-width:720px}th,td{text-align:left;padding:12px 18px;border-bottom:1px solid #1c2a3e}th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;background:#091424}.scroll{overflow:auto}.tag{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;background:#1a2940}.empty{padding:56px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:18px}.error{margin-top:12px;border:1px solid #7f1d34;background:#3c1520;padding:12px;border-radius:12px;color:#fecdd3}.hide{display:none}footer{border-top:1px solid var(--line);margin-top:30px;padding:18px 0;color:var(--muted);font-size:12px;line-height:1.6}@media(max-width:900px){.controls{grid-template-columns:1fr}.exact-option{padding:6px 4px}.top{align-items:start;flex-direction:column}.controls{grid-template-columns:1fr}.modes{display:grid;grid-template-columns:1fr 1fr}.cardhead{gap:12px;align-items:start}.summary{align-items:start;gap:10px}h1{font-size:25px}}
+</style></head><body>
+<header><div class="wrap top"><div><div class="eyebrow">Editorial and Production Applications | FM Systems</div><h1>FileMaker DDR Parser for Layout</h1><div class="muted">Upload FileMaker XML DDR and search for field or layout name.</div></div><div class="actions"><select id="exportFormat" aria-label="Export format"><option value="csv">CSV</option><option value="excel">Excel</option></select> <button id="export" disabled>Export results</button> <button class="primary" id="open">Open DDR XML</button><input id="files" class="hide" type="file" multiple accept=".xml,text/xml,application/xml"></div></div></header>
+<main class="wrap"><section class="panel"><div class="controls"><div class="modes"><button class="mode active" data-mode="field">Field usage</button><button class="mode" data-mode="layout">Layout contents</button></div><label class="exact-option" title="Match the complete field or layout name only"><input id="exactMatch" type="checkbox"> <span>Exact match</span></label><input id="search" class="search" disabled placeholder="Search field name or Table::Field..."><button id="cancel" class="hide">Cancel</button></div><div id="status" class="status"><span>Choose one or more detail DDR XML files to begin.</span></div><div id="progress" class="bar hide"><i></i></div><div id="error" class="error hide"></div></section><div class="summary"><h2>Results</h2><span id="count" class="muted">Enter a search term</span></div><section id="results"><div class="empty">Open a classic FileMaker DDR detail XML file. Multi-file and nested layout-folder discovery are supported.</div></section><footer>Large-file safeguards: 2 MB incremental reads, background-worker parsing, BOM/XML encoding detection, progress reporting, cancellation, and result rendering limited to the active search. Select detail report XML files that contain both field definitions and layouts. Summary.xml alone does not contain layout details.</footer></main>
+<script>
+let layouts=[],mode='field',cancelled=false;
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const lname=e=>(e.localName||e.nodeName||'').toLowerCase();
+const direct=(e,name)=>Array.from(e.children||[]).find(x=>lname(x)===name.toLowerCase());
+const childrenBy=(e,name)=>Array.from(e.children||[]).filter(x=>lname(x)===name.toLowerCase());
+const descendants=(e,name)=>Array.from(e.getElementsByTagName('*')).filter(x=>lname(x)===name.toLowerCase());
+const yieldUI=()=>new Promise(r=>setTimeout(r,0));
+function decode(buf){const b=new Uint8Array(buf);let enc='utf-8';if(b[0]===255&&b[1]===254)enc='utf-16le';else if(b[0]===254&&b[1]===255)enc='utf-16be';return new TextDecoder(enc).decode(buf)}
+async function parseFile(file,buf){
+ const text=decode(buf); await yieldUI();
+ const xml=new DOMParser().parseFromString(text,'application/xml');
+ const pe=xml.querySelector('parsererror');if(pe)throw Error('XML parse error in '+file.name+': '+pe.textContent.slice(0,180));
+ const typeMap=new Map();let n=0;
+ for(const bt of descendants(xml,'BaseTable')){
+  if(cancelled)throw Error('Cancelled');
+  if(lname(bt.parentElement)!=='basetablecatalog')continue;
+  const table=bt.getAttribute('name')||'';
+  for(const fc of childrenBy(bt,'FieldCatalog'))for(const f of childrenBy(fc,'Field')){
+   const name=f.getAttribute('name')||'',data=f.getAttribute('dataType')||'Unknown',kind=f.getAttribute('fieldType')||'';
+   if(name){const value=kind&&kind!=='Normal'?data+' · '+kind:data;typeMap.set((table+'::'+name).toLowerCase(),value);if(!typeMap.has(name.toLowerCase()))typeMap.set(name.toLowerCase(),value)}
+  }
+  if(++n%10===0)await yieldUI();
+ }
+ const found=[];n=0;
+ for(const cat of descendants(xml,'LayoutCatalog')){
+  const catalogLayouts=descendants(cat,'Layout').filter(lay=>{
+   let parent=lay.parentElement;
+   while(parent&&parent!==cat){if(lname(parent)==='layout')return false;parent=parent.parentElement}
+   return parent===cat;
+  });
+  for(const lay of catalogLayouts){
+  if(cancelled)throw Error('Cancelled');
+  const folderParts=[];let parent=lay.parentElement;
+  while(parent&&parent!==cat){
+   const tag=lname(parent),folderName=parent.getAttribute?.('name')||'';
+   if(folderName&&(tag==='folder'||tag==='layoutfolder'||tag==='group'))folderParts.unshift(folderName);
+   parent=parent.parentElement;
+  }
+  const folder=folderParts.join(' / '),tableNode=direct(lay,'Table'),fields=[];
+  for(const obj of childrenBy(lay,'Object')){
+   const objectType=obj.getAttribute('type')||'Object';
+   for(const fo of descendants(obj,'FieldObj')){
+    const ddr=direct(fo,'DDRInfo'),ref=ddr&&childrenBy(ddr,'Field')[0];
+    let table=ref?.getAttribute('table')||'',name=ref?.getAttribute('name')||'';
+    if(!name){const full=(direct(fo,'Name')?.textContent||'').trim(),cut=full.lastIndexOf('::');if(cut>=0){table=full.slice(0,cut);name=full.slice(cut+2)}else name=full}
+    if(name)fields.push({name,table,fieldType:typeMap.get((table+'::'+name).toLowerCase())||typeMap.get(name.toLowerCase())||'Unknown',objectType});
+   }
+  }
+  found.push({name:lay.getAttribute('name')||'(Unnamed layout)',id:lay.getAttribute('id')||'',folder,table:tableNode?.getAttribute('name')||'',file:file.name,fields});
+  if(++n%5===0)await yieldUI();
+  }
+ }
+ return{layouts:found,fieldKeys:typeMap.size};
+}
+function showError(x){$('#error').textContent=x;$('#error').classList.remove('hide')}
+function busy(v){$('#open').disabled=v;$('#cancel').classList.toggle('hide',!v);if(!v)$('#progress').classList.add('hide')}
+function setProgress(label,p){$('#status').innerHTML='<span>'+esc(label)+'</span><span>'+p+'%</span>';$('#progress').classList.remove('hide');$('#progress i').style.width=p+'%'}
+async function loadFiles(files){
+ cancelled=false;layouts=[];busy(true);$('#search').disabled=true;$('#error').classList.add('hide');const begin=performance.now();let keys=0;
+ try{for(let i=0;i<files.length;i++){const f=files[i];setProgress('Reading '+f.name,Math.round(i/files.length*100));const buf=await f.arrayBuffer();setProgress('Parsing '+f.name,Math.round((i+.35)/files.length*100));await yieldUI();const r=await parseFile(f,buf);layouts.push(...r.layouts);keys+=r.fieldKeys;setProgress('Completed '+f.name,Math.round((i+1)/files.length*100));await yieldUI()}
+  busy(false);$('#search').disabled=false;$('#status').innerHTML='<span>Ready</span><span>'+layouts.length.toLocaleString()+' layouts</span><span>'+keys.toLocaleString()+' field keys</span><span>'+((performance.now()-begin)/1000).toFixed(2)+' s</span>';render();
+ }catch(x){busy(false);showError(x.message||String(x));$('#status').innerHTML='<span>Parsing stopped</span>'}
+}
+$('#open').onclick=()=>$('#files').click();
+$('#files').onchange=e=>{const files=[...e.target.files];if(files.length)loadFiles(files)};
+$('#cancel').onclick=()=>{cancelled=true};
+function updateSearchHint(){const exact=$('#exactMatch').checked;$('#search').placeholder=mode==='field'?(exact?'Exact field name or exact Table::Field...':'Search field name or Table::Field...'):(exact?'Exact layout name or folder path...':'Search layout or folder name...')}document.querySelectorAll('.mode').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active',x===b));updateSearchHint();render()});
+$('#search').oninput=render;$('#exactMatch').onchange=()=>{updateSearchHint();render()};
+function currentResults(){
+ const raw=$('#search').value.trim(),q=raw.toLowerCase(),exact=$('#exactMatch').checked;
+ if(!q)return [];
+ const matches=(value)=>exact?String(value??'').toLowerCase()===q:String(value??'').toLowerCase().includes(q);
+ return mode==='layout'
+  ? layouts.filter(l=>matches(l.name)||matches((l.folder?l.folder+' / ':'')+l.name)).map(layout=>({layout,fields:layout.fields}))
+  : layouts.map(layout=>({layout,fields:layout.fields.filter(f=>matches(f.name)||matches(f.table+'::'+f.name))})).filter(x=>x.fields.length);
+}
+function exportRows(){
+ const rows=[];
+ for(const item of currentResults())for(const f of item.fields)rows.push({
+  'Source File':item.layout.file,'Layout Folder':item.layout.folder||'','Layout':item.layout.name,'Layout Context':item.layout.table||'',
+  'Field':f.name,'Table':f.table||'','Field Type':f.fieldType,'Layout Object':f.objectType
+ });
+ return rows;
+}
+function downloadBlob(content,type,name){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function exportResults(){
+ const rows=exportRows();if(!rows.length){showError('There are no matching result rows to export. Enter a search term first.');return}
+ const headers=Object.keys(rows[0]),stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-'),format=$('#exportFormat').value;
+ if(format==='csv'){
+  const csv='\uFEFF'+[headers,...rows.map(r=>headers.map(h=>r[h]))].map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  downloadBlob(csv,'text/csv;charset=utf-8','filemaker-ddr-results-'+stamp+'.csv');
+ }else{
+  const cell=v=>'<Cell><Data ss:Type="String">'+String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</Data></Cell>';
+  const xml='<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="DDR Results"><Table><Row>'+headers.map(cell).join('')+'</Row>'+rows.map(r=>'<Row>'+headers.map(h=>cell(r[h])).join('')+'</Row>').join('')+'</Table></Worksheet></Workbook>';
+  downloadBlob(xml,'application/vnd.ms-excel','filemaker-ddr-results-'+stamp+'.xls');
+ }
+}
+$('#export').onclick=exportResults;
+function render(){const q=$('#search').value.trim().toLowerCase(),r=currentResults();$('#export').disabled=!r.length;const matches=r.reduce((n,x)=>n+x.fields.length,0);$('#count').textContent=q?r.length+' layouts · '+matches+' fields':'Enter a search term';$('#results').innerHTML=r.length?r.map(x=>'<article class="card"><div class="cardhead"><div><h3>'+esc(x.layout.name)+'</h3><div class="small">'+esc(x.layout.file)+(x.layout.folder?' · folder: '+esc(x.layout.folder):'')+(x.layout.table?' · context: '+esc(x.layout.table):'')+'</div></div><div class="small">'+x.fields.length+' field(s)</div></div><div class="scroll"><table><thead><tr><th>Field</th><th>Table</th><th>Field type</th><th>Layout object</th></tr></thead><tbody>'+x.fields.map(f=>'<tr><td><b>'+esc(f.name)+'</b></td><td>'+esc(f.table||'Unknown')+'</td><td><span class="tag">'+esc(f.fieldType)+'</span></td><td><span class="tag">'+esc(f.objectType)+'</span></td></tr>').join('')+'</tbody></table></div></article>').join(''):'<div class="empty">'+(layouts.length?(q?'No matching layouts or fields.':'Use either search mode above.'):'Open a classic FileMaker DDR detail XML file. Multi-file and nested layout-folder discovery are supported.')+'</div>'}
+</script></body></html>
